@@ -10,6 +10,9 @@ import androidx.core.app.NotificationCompat
 import com.gabut.autopost.MainActivity
 import com.gabut.autopost.R
 import com.gabut.autopost.service.PostingService
+import com.gabut.autopost.ui.i18n.appLocale
+import com.gabut.autopost.ui.i18n.localizedContext
+import com.gabut.autopost.ui.i18n.t
 
 /**
  * Every notification this app can post, in one place, so channel ids and intents cannot drift
@@ -23,16 +26,36 @@ object Notifications {
 
     const val POSTING_NOTIFICATION_ID = 1001
 
+    private const val PREFS = "notification_channels"
+    private const val KEY_CHANNEL_LANGUAGE = "channel_language"
+
     fun createChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        // Channel names are localised resources. Android keeps the first name it was given, so the
+        // channels are deleted and recreated whenever the app language changed since last run.
+        val wantedLanguage = appLocale().language
+        val storedLanguage = context
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_CHANNEL_LANGUAGE, null)
+        if (storedLanguage != null && storedLanguage != wantedLanguage) {
+            manager.deleteNotificationChannel(CHANNEL_POSTING)
+            manager.deleteNotificationChannel(CHANNEL_ALERTS)
+            manager.deleteNotificationChannel(CHANNEL_EVENTS)
+        }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CHANNEL_LANGUAGE, wantedLanguage)
+            .apply()
+
+        val localized = localizedContext(context)
 
         // The persistent service notification (D1). Low importance: visible, never noisy.
         val posting = NotificationChannel(
             CHANNEL_POSTING,
-            context.getString(R.string.channel_posting_name),
+            localized.getString(R.string.channel_posting_name),
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = context.getString(R.string.channel_posting_description)
+            description = localized.getString(R.string.channel_posting_description)
             setShowBadge(false)
             setSound(null, null)
             enableVibration(false)
@@ -41,20 +64,20 @@ object Notifications {
         // Problems that need the owner's hands (D18): high importance, alert once.
         val alerts = NotificationChannel(
             CHANNEL_ALERTS,
-            context.getString(R.string.channel_alerts_name),
+            localized.getString(R.string.channel_alerts_name),
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
-            description = context.getString(R.string.channel_alerts_description)
+            description = localized.getString(R.string.channel_alerts_description)
             enableVibration(true)
         }
 
         // Routine events (a long rate limit, a recovered channel): quiet.
         val events = NotificationChannel(
             CHANNEL_EVENTS,
-            context.getString(R.string.channel_events_name),
+            localized.getString(R.string.channel_events_name),
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = context.getString(R.string.channel_events_description)
+            description = localized.getString(R.string.channel_events_description)
             setShowBadge(false)
         }
 
@@ -78,7 +101,7 @@ object Notifications {
 
         val builder = NotificationCompat.Builder(context, CHANNEL_POSTING)
             .setSmallIcon(R.drawable.ic_stat_posting)
-            .setContentTitle(context.getString(R.string.notification_posting_title))
+            .setContentTitle(localizedContext(context).getString(R.string.notification_posting_title))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setOngoing(!paused)
@@ -89,20 +112,46 @@ object Notifications {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
         if (!paused) {
-            builder.addAction(0, context.getString(R.string.notification_stop_all), stopAll)
+            builder.addAction(
+                0,
+                localizedContext(context).getString(R.string.notification_stop_all),
+                stopAll
+            )
         }
         return builder.build()
     }
 
     /** `Posting - 2 bots - 7 channels - 134 sent` (D20). */
-    fun postingText(runningTokens: Int, channels: Int, sent: Int): String =
-        "Posting - $runningTokens bots - $channels channels - $sent sent"
+    fun postingText(
+        runningTokens: Int,
+        channels: Int,
+        verifiers: Int = 0,
+        sent: Int
+    ): String =
+        buildString {
+            append(
+                t(
+                    "Posting - $runningTokens bots - $channels channels",
+                    "Memposting - $runningTokens bot - $channels channel"
+                )
+            )
+            if (verifiers > 0) {
+                append(t(" - $verifiers verifying", " - $verifiers memverifikasi"))
+            }
+            append(t(" - $sent sent", " - $sent terkirim"))
+        }
 
     /** Same counts, without the word "Posting", so the top bar and the notification agree. */
     fun summaryText(runningTokens: Int, channels: Int): String =
-        "$runningTokens bots running \u00b7 $channels channels"
+        t(
+            "$runningTokens bots running \u00b7 $channels channels",
+            "$runningTokens bot jalan \u00b7 $channels channel"
+        )
 
-    fun pausedText(): String = "Paused by Android - posting stopped"
+    fun pausedText(): String = t(
+        "Paused by Android - posting stopped",
+        "Dijeda oleh Android - posting berhenti"
+    )
 
     fun alertsNotification(
         context: Context,

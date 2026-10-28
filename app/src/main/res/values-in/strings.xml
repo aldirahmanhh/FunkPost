@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FunkPost</string>
+
+    <string name="channel_posting_name">Status posting</string>
+    <string name="channel_posting_description">Menampilkan bot mana yang sedang posting di latar belakang.</string>
+    <string name="channel_alerts_name">Masalah yang butuh perhatian</string>
+    <string name="channel_alerts_description">Token bot berhenti bekerja atau channel terus gagal.</string>
+    <string name="channel_events_name">Peristiwa posting</string>
+    <string name="channel_events_description">Rate limit panjang dan channel yang pulih.</string>
+
+    <string name="notification_posting_title">FunkPost</string>
+    <string name="notification_stop_all">Hentikan semua</string>
+</resources>

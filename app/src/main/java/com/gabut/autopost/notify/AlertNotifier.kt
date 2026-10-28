@@ -4,6 +4,7 @@ import android.app.NotificationManager
 import android.content.Context
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.flow.MutableStateFlow
+import com.gabut.autopost.ui.i18n.t
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -29,9 +30,11 @@ class AlertNotifier(
         publish(
             key = "auth:$tokenId",
             id = ALERT_ID_AUTH + tokenId.toInt(),
-            title = "Bot token rejected",
-            body = "Discord rejected this bot token. Posting is paused until you fix it.",
-            tokenId = tokenId
+            title = t("Bot token rejected", "Token bot ditolak"),
+            body = t(
+                "Discord rejected this bot token. Posting is paused until you fix it.",
+                "Discord menolak token bot ini. Posting dijeda sampai kamu memperbaikinya."
+            )
         )
     }
 
@@ -39,9 +42,11 @@ class AlertNotifier(
         publish(
             key = "unreadable:$tokenId",
             id = ALERT_ID_UNREADABLE + tokenId.toInt(),
-            title = "Token needs re-entry",
-            body = "This token could not be decrypted. Enter it again in Settings.",
-            tokenId = tokenId
+            title = t("Token needs re-entry", "Token perlu dimasukkan ulang"),
+            body = t(
+                "This token could not be decrypted. Enter it again in Settings.",
+                "Token ini tidak bisa didekripsi. Masukkan lagi di Setelan."
+            )
         )
     }
 
@@ -50,9 +55,35 @@ class AlertNotifier(
         publish(
             key = "failing:$tokenId:$channelId",
             id = ALERT_ID_CHANNEL + channelId.hashCode(),
-            title = "Channel keeps failing",
-            body = "Channel $channelId has failed $consecutiveFailures times in a row.",
-            tokenId = tokenId
+            title = t("Channel keeps failing", "Channel terus gagal"),
+            body = t(
+                "Channel $channelId has failed $consecutiveFailures times in a row.",
+                "Channel $channelId gagal $consecutiveFailures kali berturut-turut."
+            )
+        )
+    }
+
+    fun notifyVerifierAuthFailed(verifierId: Long) {
+        publish(
+            key = "verifier_auth:$verifierId",
+            id = ALERT_ID_VERIFIER_AUTH + verifierId.toInt(),
+            title = t("Verifier account rejected", "Akun verifier ditolak"),
+            body = t(
+                "Discord rejected this account's token. Auto-verify is paused until you fix it.",
+                "Discord menolak token akun ini. Verifikasi otomatis dijeda sampai kamu perbaiki."
+            )
+        )
+    }
+
+    fun notifyVerifierUnreadable(verifierId: Long, name: String) {
+        publish(
+            key = "verifier_unreadable:$verifierId",
+            id = ALERT_ID_VERIFIER_UNREADABLE + verifierId.toInt(),
+            title = t("$name needs its token again", "$name perlu token lagi"),
+            body = t(
+                "This verifier's token could not be decrypted. Enter it again in Settings.",
+                "Token verifier ini tidak bisa didekripsi. Masukkan lagi di Setelan."
+            )
         )
     }
 
@@ -64,14 +95,17 @@ class AlertNotifier(
 
         val notification = Notifications.eventNotification(
             context,
-            "Discord rate limit",
-            "Channel $channelId is waiting ${seconds}s before the next post.",
+            t("Discord rate limit", "Rate limit Discord"),
+            t(
+                "Channel $channelId is waiting ${seconds}s before the next post.",
+                "Channel $channelId menunggu ${seconds}dtk sebelum posting berikutnya."
+            ),
             EVENT_ID_RATE_LIMIT + channelId.hashCode()
         )
         manager?.notify(EVENT_ID_RATE_LIMIT + channelId.hashCode(), notification)
     }
 
-    private fun publish(key: String, id: Int, title: String, body: String, tokenId: Long) {
+    private fun publish(key: String, id: Int, title: String, body: String) {
         if (!shouldPublish(key)) return
 
         if (!notificationsEnabled()) {
@@ -82,7 +116,7 @@ class AlertNotifier(
             context = context,
             title = title,
             body = body,
-            tokenId = tokenId,
+            tokenId = null,
             requestCode = id
         )
         manager?.notify(id, notification)
@@ -117,6 +151,8 @@ class AlertNotifier(
         private const val ALERT_ID_AUTH = 2000
         private const val ALERT_ID_UNREADABLE = 2100
         private const val ALERT_ID_CHANNEL = 2200
-        private const val EVENT_ID_RATE_LIMIT = 3000
+        private const val ALERT_ID_VERIFIER_AUTH = 3000
+        private const val ALERT_ID_VERIFIER_UNREADABLE = 3100
+        private const val EVENT_ID_RATE_LIMIT = 4000
     }
 }

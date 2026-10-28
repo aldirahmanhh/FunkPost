@@ -57,11 +57,17 @@ class TinkSecretCipher private constructor(private val aead: Aead) : SecretCiphe
             }
 
         /** Builds a fresh instance; tests use this to avoid the process-wide singleton. */
-        fun build(context: Context): TinkSecretCipher {
+        fun build(context: Context): TinkSecretCipher = build(context, keysetFile(context))
+
+        /**
+         * Test seam. Builds a cipher over an explicit keyset file so instrumentation tests can
+         * rotate or delete a throwaway keyset without ever touching the real one in
+         * `filesDir/keysets` - deleting the production keyset would make every stored bot token
+         * undecryptable on the device running the tests.
+         */
+        fun build(context: Context, keysetFile: File): TinkSecretCipher {
             AeadConfig.register()
-            val keysetFile = keysetFile(context)
-            val masterKeyUri = MASTER_KEY_URI
-            val handle = readOrCreateKeyset(keysetFile, masterKeyUri)
+            val handle = readOrCreateKeyset(keysetFile, MASTER_KEY_URI)
             return TinkSecretCipher(handle.getPrimitive(Aead::class.java))
         }
 

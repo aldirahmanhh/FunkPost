@@ -20,10 +20,17 @@ class SecretCipherTest {
 
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
 
+    /**
+     * A throwaway keyset under cacheDir. Instrumented tests run against the real installed app,
+     * so deleting the production keyset here would corrupt every token the user has stored.
+     */
+    private fun testKeysetFile(): java.io.File =
+        java.io.File(context.cacheDir, "test-keysets/secret-cipher-keyset")
+
     private fun cipher(): TinkSecretCipher {
         // A fresh instance so the test does not depend on the process-wide singleton's lifetime.
-        TinkSecretCipher.keysetFile(context).delete()
-        return TinkSecretCipher.build(context)
+        testKeysetFile().delete()
+        return TinkSecretCipher.build(context, testKeysetFile())
     }
 
     @Test
@@ -70,17 +77,15 @@ class SecretCipherTest {
     }
 
     @Test
-    fun keysetLivesOnlyInAppPrivateStorage() {
-        val cipher = cipher()
-        cipher.encrypt("anything")
-
+    fun productionKeysetPathStaysUnderFilesDir() {
+        // Path check only: this test must never delete or rewrite the real keyset.
         val keysetFile = TinkSecretCipher.keysetFile(context)
-        assertTrue("keyset must be created at filesDir/keysets/", keysetFile.isFile)
         assertTrue(
             "keyset path must stay under filesDir",
             keysetFile.absolutePath.startsWith(context.filesDir.absolutePath)
         )
-        println("keyset at ${keysetFile.relativeTo(context.filesDir)}")
+        assertEquals("keysets/autopost_keyset", keysetFile.relativeTo(context.filesDir).invariantSeparatorsPath)
+        println("production keyset path = ${keysetFile.relativeTo(context.filesDir)}")
     }
 
     @Test

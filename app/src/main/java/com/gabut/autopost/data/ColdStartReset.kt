@@ -11,5 +11,6 @@ package com.gabut.autopost.data
 object ColdStartReset {
     suspend fun resetAll(repository: PostRepository) {
         repository.resetAllRunning()
+        repository.resetAllVerifierRunning()
     }
 }

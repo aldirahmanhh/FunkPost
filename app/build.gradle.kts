@@ -88,6 +88,7 @@ dependencies {
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.core)
     debugImplementation(libs.compose.ui.tooling)
 
     implementation(libs.androidx.room.runtime)

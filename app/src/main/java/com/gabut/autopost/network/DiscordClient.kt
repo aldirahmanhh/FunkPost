@@ -72,7 +72,7 @@ class DiscordClient(
             .format(Date(now()))
 
         return JSONObject()
-            .put("title", "\u003ca:ms_discord:1129069176917610619\u003e Auto Post Discord " +
+            .put("title", "\u003ca:ms_discord:1129069176917610619\u003e FunkPost Discord" +
                 "\u003ca:ms_discord:1129069176917610619\u003e")
             .put("description", "> **Details Info**")
             .put("color", if (success) COLOUR_SUCCESS else COLOUR_FAILURE)
@@ -151,7 +151,7 @@ class DiscordClient(
         private const val DEFAULT_BASE_URL = "https://discord.com/api/v10"
         private const val COLOUR_SUCCESS = 65280
         private const val COLOUR_FAILURE = 16711680
-        private const val FOOTER = "Auto Post By Lantas Continental. design By Void_String"
+        private const val FOOTER = "FunkPost By Lantas Continental. design By Void_String"
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
         private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

@@ -17,7 +17,7 @@ class MainNavigationTest {
 
     @Test
     fun allTabsExist() {
-        listOf("tab_channels", "tab_settings", "tab_webhook", "tab_credit").forEach { tag ->
+        listOf("tab_channels", "tab_logs", "tab_settings", "tab_credit").forEach { tag ->
             composeRule.onNodeWithTag(tag).assertIsDisplayed()
         }
     }
@@ -26,7 +26,7 @@ class MainNavigationTest {
     fun navigatingToEachTabShowsPlaceholder() {
         listOf(
             "tab_settings" to "screen_settings",
-            "tab_webhook" to "screen_webhook",
+            "tab_logs" to "screen_logs",
             "tab_credit" to "screen_credit",
             "tab_channels" to "screen_channels"
         ).forEach { (tabTag, screenTag) ->

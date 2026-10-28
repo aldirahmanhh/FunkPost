@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.gabut.autopost.ui.AutoPostViewModel
+import com.gabut.autopost.ui.i18n.t
 
 /**
  * Webhook tab: per-bot webhook logging (the reference feature) plus a Test button.
@@ -37,7 +38,10 @@ fun WebhookScreen(viewModel: AutoPostViewModel, modifier: Modifier = Modifier) {
 
     if (selected == null) {
         Column(modifier = modifier.padding(16.dp)) {
-            Text("No bot selected.", modifier = Modifier.testTag("webhook_empty"))
+            Text(
+                t("No bot selected.", "Belum ada bot yang dipilih."),
+                modifier = Modifier.testTag("webhook_empty")
+            )
         }
         return
     }
@@ -51,12 +55,12 @@ fun WebhookScreen(viewModel: AutoPostViewModel, modifier: Modifier = Modifier) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        Text("Webhook logging", style = MaterialTheme.typography.titleLarge)
+        Text(t("Webhook logging", "Log webhook"), style = MaterialTheme.typography.titleLarge)
         Text(selected.name, style = MaterialTheme.typography.labelSmall)
         Spacer(Modifier.height(8.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Enable webhook", style = MaterialTheme.typography.bodyLarge)
+            Text(t("Enable webhook", "Aktifkan webhook"), style = MaterialTheme.typography.bodyLarge)
             Switch(
                 modifier = Modifier
                     .padding(start = 8.dp)
@@ -72,7 +76,7 @@ fun WebhookScreen(viewModel: AutoPostViewModel, modifier: Modifier = Modifier) {
                 .testTag("webhook_url_field"),
             value = url,
             onValueChange = { url = it },
-            label = { Text("Webhook URL") },
+            label = { Text(t("Webhook URL", "URL webhook")) },
             singleLine = true
         )
 
@@ -82,7 +86,7 @@ fun WebhookScreen(viewModel: AutoPostViewModel, modifier: Modifier = Modifier) {
                     .padding(top = 8.dp)
                     .testTag("webhook_save_button"),
                 onClick = { viewModel.saveWebhook(selected.id, enabled, url) }
-            ) { Text("Save") }
+            ) { Text(t("Save", "Simpan")) }
 
             Button(
                 modifier = Modifier
@@ -90,17 +94,21 @@ fun WebhookScreen(viewModel: AutoPostViewModel, modifier: Modifier = Modifier) {
                     .testTag("webhook_test_button"),
                 onClick = {
                     viewModel.testWebhook(selected.id) { ok, message ->
-                        result = if (ok) "Success: $message" else "Error: $message"
+                        result = if (ok) {
+                            t("Success: $message", "Berhasil: $message")
+                        } else {
+                            t("Error: $message", "Gagal: $message")
+                        }
                     }
                 }
-            ) { Text("Test webhook") }
+            ) { Text(t("Test webhook", "Uji webhook")) }
         }
 
         result?.let {
             Spacer(Modifier.height(8.dp))
             Text(
                 it,
-                color = if (it.startsWith("Success")) {
+                color = if (it.startsWith(t("Success", "Berhasil"))) {
                     MaterialTheme.colorScheme.tertiary
                 } else {
                     MaterialTheme.colorScheme.error

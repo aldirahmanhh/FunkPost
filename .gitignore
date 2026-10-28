@@ -1,21 +1,58 @@
-# gradle
+# ---- Gradle / Android build output ----------------------------------------
 .gradle/
 build/
-local.properties
-*.keystore
-key.properties
-
-# ide
-.idea/
-*.iml
-.DS_Store
+*/build/
+app/build/
 captures/
 .externalNativeBuild/
 .cxx/
 
-# misc
-*.log
+# Local machine config: SDK path and signing material must never be committed.
+local.properties
+*.jks
+*.keystore
+key.properties
+keystore.properties
 
-# local scratch (session artifacts, not project sources)
+# ---- IDE ----------------------------------------------------------------
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+out/
+
+# ---- OS ----------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Logs and crash dumps ----------------------------------------------
+*.log
+hs_err_pid*
+replay_pid*
+
+# ---- Local scratch -----------------------------------------------------
+# Database snapshots and UI dumps pulled off a device while debugging.
+*.db
+*.db-wal
+*.db-shm
+ui-dump.xml
+ui*.xml
 gv.txt
 test-run.log
+
+# ---- Agent / session artifacts -----------------------------------------
+# Plans, notes and screenshots produced while working on the project. They are
+# useful locally but are not part of the app source.
+.omo/
+.claude/
+
+# ---- Keep these --------------------------------------------------------
+# Room schema history is source: it is what proves a migration is correct.
+!app/schemas/**
+# The Gradle wrapper must ship with the repo so a fresh clone can build.
+!gradle/wrapper/gradle-wrapper.jar

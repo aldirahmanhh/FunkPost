@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -19,6 +20,9 @@ class SettingsStore(private val context: Context) {
         val ACTIVE_TOKEN_ID: Preferences.Key<Long> = longPreferencesKey("active_token_id")
         val BATTERY_CARD_DISMISSED: Preferences.Key<Boolean> =
             booleanPreferencesKey("battery_card_dismissed")
+
+        /** UI language code ("en"/"id"). Unset means "follow the phone", decided once on first run. */
+        val LANGUAGE: Preferences.Key<String> = stringPreferencesKey("language")
     }
 
     /** Reference default is light mode (`autopost.py:12`). */
@@ -41,6 +45,13 @@ class SettingsStore(private val context: Context) {
         context.autopostSettingsDataStore.edit { prefs ->
             prefs[Keys.BATTERY_CARD_DISMISSED] = dismissed
         }
+    }
+
+    val languageFlow: Flow<String?> =
+        context.autopostSettingsDataStore.data.map { prefs -> prefs[Keys.LANGUAGE] }
+
+    suspend fun setLanguage(code: String) {
+        context.autopostSettingsDataStore.edit { prefs -> prefs[Keys.LANGUAGE] = code }
     }
 
     suspend fun setActiveTokenId(tokenId: Long?) {

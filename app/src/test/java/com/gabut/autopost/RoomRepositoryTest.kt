@@ -4,8 +4,10 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.gabut.autopost.data.ColdStartReset
 import com.gabut.autopost.data.PostRepository
+import com.gabut.autopost.data.PostLogEventType
 import com.gabut.autopost.data.db.AutoPostDatabase
 import com.gabut.autopost.data.db.BotTokenEntity
+import com.gabut.autopost.data.db.PostLogEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import java.util.concurrent.ExecutorService
@@ -46,7 +48,12 @@ class RoomRepositoryTest {
             .setQueryExecutor(dbExecutor)
             .setTransactionExecutor(dbExecutor)
             .build()
-        repo = PostRepository(db.botTokenDao(), db.channelDao())
+        repo = PostRepository(
+            db.botTokenDao(),
+            db.channelDao(),
+            db.postLogDao(),
+            db.verifierDao()
+        )
     }
 
     @After

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Auto Post</string>
+    <string name="app_name">FunkPost</string>
 
     <string name="channel_posting_name">Posting status</string>
     <string name="channel_posting_description">Shows which bots are posting in the background.</string>
@@ -9,6 +9,6 @@
     <string name="channel_events_name">Posting events</string>
     <string name="channel_events_description">Long rate limits and recovered channels.</string>
 
-    <string name="notification_posting_title">Auto Post</string>
+    <string name="notification_posting_title">FunkPost</string>
     <string name="notification_stop_all">Stop all</string>
 </resources>

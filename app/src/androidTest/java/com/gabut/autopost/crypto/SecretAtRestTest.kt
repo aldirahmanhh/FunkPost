@@ -33,12 +33,20 @@ class SecretAtRestTest {
     /** Deliberately recognisable so scanning the bytes cannot produce a false negative. */
     private val plaintextToken = "PLAINTEXT-LEAK-CANARY-0123456789.abcdefghijklmnopqrstuvwxyz"
 
+    /**
+     * Instrumentation tests share the installed app's storage, so every keyset operation here
+     * must target a throwaway file. Touching `filesDir/keysets/autopost_keyset` would make the
+     * user's real bot tokens undecryptable on this device.
+     */
+    private fun testKeysetFile(): java.io.File =
+        java.io.File(context.cacheDir, "test-keysets/secret-at-rest-keyset")
+
     @Before
     fun setUp() {
         context.deleteDatabase("atrest.db")
         dbPath = context.getDatabasePath("atrest.db").absolutePath
         db = Room.databaseBuilder(context, AutoPostDatabase::class.java, "atrest.db").build()
-        repo = PostRepository(db.botTokenDao(), db.channelDao())
+        repo = PostRepository(db.botTokenDao(), db.channelDao(), db.postLogDao(), db.verifierDao())
     }
 
     @After
@@ -58,7 +66,8 @@ class SecretAtRestTest {
 
     @Test
     fun plaintextTokenNeverLandsInTheDatabaseFile() = runBlocking {
-        val cipher = TinkSecretCipher.build(context)
+        testKeysetFile().delete()
+        val cipher = TinkSecretCipher.build(context, testKeysetFile())
         val ciphertext = cipher.encrypt(plaintextToken)
 
         val id = repo.addToken(
@@ -79,16 +88,17 @@ class SecretAtRestTest {
 
     @Test
     fun deletingTheKeysetTurnsDecryptionIntoAReEnterState() {
-        val cipher = TinkSecretCipher.build(context)
+        testKeysetFile().delete()
+        val cipher = TinkSecretCipher.build(context, testKeysetFile())
         val ciphertext = cipher.encrypt("some-bot-token-value")
 
         // Simulates clearing app data, restoring onto another device, or a keystore invalidation:
         // the ciphertext survives, the master key does not.
-        val keyset = TinkSecretCipher.keysetFile(context)
+        val keyset = testKeysetFile()
         assertTrue("keyset must exist before the deletion", keyset.isFile)
         assertTrue(keyset.delete())
 
-        val afterLoss = TinkSecretCipher.build(context)
+        val afterLoss = TinkSecretCipher.build(context, testKeysetFile())
         assertNull("an unreadable ciphertext must return null, not throw", afterLoss.decrypt(ciphertext))
 
         println("KEY_LOSS_RESULT: decrypt returned null after the keyset was removed")

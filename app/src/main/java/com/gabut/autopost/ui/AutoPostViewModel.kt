@@ -5,8 +5,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.gabut.autopost.AutoPostApplication
 import com.gabut.autopost.crypto.MaskedPreview
+import com.gabut.autopost.data.PostLogEventType
 import com.gabut.autopost.data.db.BotTokenEntity
 import com.gabut.autopost.data.db.ChannelEntity
+import com.gabut.autopost.data.db.PostLogEntity
+import com.gabut.autopost.data.db.VerifierEntity
+import com.gabut.autopost.ui.i18n.AppLanguage
+import com.gabut.autopost.ui.i18n.LanguageState
+import com.gabut.autopost.ui.i18n.t
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -30,17 +36,50 @@ data class TokenRow(
     val needsReentry: Boolean
 )
 
-/** A channel plus the human-readable status line derived from its last attempt (D20). */
+/**
+ * One row of the channel list.
+ *
+ * The countdown is deliberately NOT a pre-rendered string: a string cached here only changes when
+ * the database changes, so "next in 04:12" would freeze until the next post. The row carries the
+ * raw [nextTickAt] and the screen formats it against a ticking clock.
+ */
 data class ChannelRow(
     val id: Long,
     val channelId: String,
     val message: String,
     val intervalSeconds: Int,
-    val statusLine: String,
+    val nextTickAt: Long?,
     val statusKind: ChannelStatusKind
 )
 
+/** One row of the Verifiers tab: a user token that clicks verify buttons. */
+data class VerifierRow(
+    val id: Long,
+    val name: String,
+    val maskedToken: String,
+    val watchChannelId: String,
+    val running: Boolean,
+    val clickedCount: Int,
+    val lastEventText: String?,
+    val statusKind: VerifierStatusKind
+)
+
+enum class VerifierStatusKind { WATCHING, STOPPED, AUTH_FAILED, UNREADABLE }
+
 enum class ChannelStatusKind { RUNNING, RATE_LIMITED, AUTH_FAILED, NEVER_POSTED, FAILING }
+
+/** One row of the Logs tab, without leaking the Room entity into the Compose layer. */
+data class LogRow(
+    val id: Long,
+    val botName: String,
+    val channelId: String?,
+    val summary: String,
+    val statusCode: Int?,
+    val occurredAt: Long,
+    val kind: LogKind
+)
+
+enum class LogKind { POSTED, RATE_LIMITED, AUTH_FAILED, FAILING, OTHER }
 
 /**
  * The single ViewModel behind every tab.
@@ -57,6 +96,25 @@ class AutoPostViewModel(application: Application) : AndroidViewModel(application
 
     val activeTokenId: StateFlow<Long?> = app.settingsStore.activeTokenIdFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /**
+     * The chosen UI language. An unset preference follows the phone, so an Indonesian device opens
+     * in Indonesian without the owner touching Settings.
+     */
+    val language: StateFlow<AppLanguage> = app.settingsStore.languageFlow
+        .map { code -> AppLanguage.fromCode(code) ?: AppLanguage.systemDefault() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, AppLanguage.systemDefault())
+
+    init {
+        // Mirror the stored choice into the global that `t()` reads. This runs in the ViewModel,
+        // not in composition, so the new language is in place before the recomposition that the
+        // StateFlow triggers - no restart and no one-frame flash of the old language.
+        viewModelScope.launch {
+            app.settingsStore.languageFlow.collect { code ->
+                LanguageState.set(AppLanguage.fromCode(code) ?: AppLanguage.systemDefault())
+            }
+        }
+    }
 
     /** Live from Room, so the status bar and the notification share one source of truth (D20). */
     private val channelCounts: StateFlow<Map<Long, Int>> = app.repository.observeChannelCounts()
@@ -106,8 +164,217 @@ class AutoPostViewModel(application: Application) : AndroidViewModel(application
         .map { channels -> channels.map { it.toRow() } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val logs: StateFlow<List<LogRow>> = app.repository.observeLogs()
+        .map { entries -> entries.map { it.toRow() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // ---- auto-verifiers ------------------------------------------------
+
+    val verifiers: StateFlow<List<VerifierRow>> = app.repository.observeVerifiers()
+        .map { entities ->
+            entities.map { entity ->
+                val plaintext = app.cipher.decrypt(entity.encryptedToken)
+                VerifierRow(
+                    id = entity.id,
+                    name = entity.name,
+                    maskedToken = MaskedPreview.of(plaintext ?: entity.encryptedToken),
+                    watchChannelId = entity.watchChannelId,
+                    running = entity.running,
+                    clickedCount = entity.clickedCount,
+                    lastEventText = entity.lastEventText,
+                    statusKind = when {
+                        plaintext == null -> VerifierStatusKind.UNREADABLE
+                        entity.lastStatus == 401 -> VerifierStatusKind.AUTH_FAILED
+                        entity.running -> VerifierStatusKind.WATCHING
+                        else -> VerifierStatusKind.STOPPED
+                    }
+                )
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Verifier accounts currently watching, for the top bar summary. */
+    val runningVerifiers: StateFlow<Int> = app.repository.observeVerifiers()
+        .map { entities -> entities.count { it.running } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    fun startVerifier(id: Long) = viewModelScope.launch { app.controller.verifyStart(id) }
+
+    fun stopVerifier(id: Long) = viewModelScope.launch { app.controller.verifyStop(id) }
+
+    /**
+     * Adds a verifier. When [botTokenId] is given, that bot's ciphertext is reused verbatim - the
+     * same token then powers both autopost and auto-verify without the user re-typing it.
+     */
+    fun addVerifier(
+        name: String,
+        token: String = "",
+        watchChannelId: String,
+        humanize: Boolean = true,
+        baseDelaySeconds: Int = 1,
+        maxClickRetries: Int = 3,
+        botTokenId: Long? = null,
+        onDone: () -> Unit = {}
+    ) = viewModelScope.launch {
+        val trimmedName = name.trim()
+        val trimmedChannel = watchChannelId.trim()
+        when {
+            trimmedName.isEmpty() -> _error.value = t(
+                "Verifier name is required",
+                "Nama verifier wajib diisi"
+            )
+            trimmedChannel.isEmpty() -> _error.value = t(
+                "Watch channel id is required",
+                "ID channel pantauan wajib diisi"
+            )
+            else -> {
+                val existing = app.repository.getAllVerifiersOnce()
+                val bot = botTokenId?.let { app.repository.getToken(it) }
+                val plaintext = if (bot != null) {
+                    app.cipher.decrypt(bot.encryptedToken) ?: run {
+                        _error.value = t("Bot token cannot be read", "Token bot tidak bisa dibaca")
+                        return@launch
+                    }
+                } else {
+                    val trimmedToken = token.trim()
+                    if (trimmedToken.isEmpty()) {
+                        _error.value = t("User token is required", "Token user wajib diisi")
+                        return@launch
+                    }
+                    trimmedToken
+                }
+                if (existing.any { app.cipher.decrypt(it.encryptedToken) == plaintext }) {
+                    _error.value = t(
+                        "This token is already used by another verifier",
+                        "Token ini sudah dipakai verifier lain"
+                    )
+                    return@launch
+                }
+                val finalName = if (trimmedName.isNotBlank()) trimmedName else (bot?.name ?: "")
+                val baseMs = baseDelaySeconds.coerceAtLeast(1) * 1_000L
+                app.repository.addVerifier(
+                    VerifierEntity(
+                        name = uniqueName(finalName, existing.map { it.name }),
+                        // Reuse the bot's ciphertext verbatim: same cipher and key, so it is valid
+                        // here too and the token never has to leave ciphertext form.
+                        encryptedToken = if (bot != null) bot.encryptedToken else app.cipher.encrypt(plaintext),
+                        watchChannelId = trimmedChannel,
+                        humanize = humanize,
+                        baseDelayMs = baseMs,
+                        minDelayMs = (baseMs / 2).coerceAtLeast(100L),
+                        maxDelayMs = maxOf(baseMs * 10, 30_000L),
+                        maxClickRetries = maxClickRetries.coerceIn(1, 10)
+                    )
+                )
+                _error.value = null
+                onDone()
+            }
+        }
+    }
+
+    fun saveVerifier(
+        id: Long,
+        name: String,
+        token: String?,
+        watchChannelId: String,
+        humanize: Boolean,
+        baseDelaySeconds: Int,
+        maxClickRetries: Int,
+        onDone: () -> Unit = {}
+    ) = viewModelScope.launch {
+        val current = app.repository.getVerifier(id) ?: return@launch
+        val others = app.repository.getAllVerifiersOnce().filter { it.id != id }
+        val trimmedName = name.trim()
+        val trimmedChannel = watchChannelId.trim()
+
+        when {
+            trimmedName.isEmpty() -> {
+                _error.value = t("Verifier name is required", "Nama verifier wajib diisi")
+                return@launch
+            }
+            trimmedChannel.isEmpty() -> {
+                _error.value = t(
+                    "Watch channel id is required",
+                    "ID channel pantauan wajib diisi"
+                )
+                return@launch
+            }
+            others.any { it.name == trimmedName } -> {
+                _error.value = t(
+                    "Another verifier already uses that name",
+                    "Nama itu sudah dipakai verifier lain"
+                )
+                return@launch
+            }
+            !token.isNullOrBlank() && others.any {
+                app.cipher.decrypt(it.encryptedToken) == token.trim()
+            } -> {
+                _error.value = t(
+                    "This token is already used by another verifier",
+                    "Token ini sudah dipakai verifier lain"
+                )
+                return@launch
+            }
+        }
+
+        val baseMs = baseDelaySeconds.coerceAtLeast(1) * 1_000L
+        val updated = current.copy(
+            name = trimmedName,
+            watchChannelId = trimmedChannel,
+            humanize = humanize,
+            baseDelayMs = baseMs,
+            minDelayMs = (baseMs / 2).coerceAtLeast(100L),
+            maxDelayMs = maxOf(baseMs * 10, 30_000L),
+            maxClickRetries = maxClickRetries.coerceIn(1, 10),
+            encryptedToken = if (token.isNullOrBlank()) {
+                current.encryptedToken
+            } else {
+                app.cipher.encrypt(token.trim())
+            }
+        )
+        app.repository.updateVerifier(updated)
+        _error.value = null
+        _info.value = t("Verifier saved", "Verifier disimpan")
+        // A running loop holds the old config; restart it so the edit takes effect now.
+        if (current.running) {
+            app.controller.verifyStop(id)
+            app.controller.verifyStart(id)
+        }
+        onDone()
+    }
+
+    fun deleteVerifier(id: Long) = viewModelScope.launch {
+        app.controller.verifyStop(id)
+        app.repository.deleteVerifier(id)
+    }
+
+    fun revealVerifierToken(id: Long, onRevealed: (String?) -> Unit) = viewModelScope.launch {
+        val entity = app.repository.getVerifier(id) ?: return@launch
+        onRevealed(app.cipher.decrypt(entity.encryptedToken))
+    }
+
+    fun clearLogs() = viewModelScope.launch {
+        app.repository.clearLogs()
+    }
+
+    private fun PostLogEntity.toRow(): LogRow = LogRow(
+        id = id,
+        botName = botName,
+        channelId = channelId,
+        summary = summary,
+        statusCode = statusCode,
+        occurredAt = occurredAt,
+        kind = when (eventType) {
+            PostLogEventType.POSTED, PostLogEventType.VERIFIED -> LogKind.POSTED
+            PostLogEventType.RATE_LIMITED -> LogKind.RATE_LIMITED
+            PostLogEventType.AUTH_FAILED -> LogKind.AUTH_FAILED
+            PostLogEventType.CHANNEL_FAILING, PostLogEventType.VERIFY_FAILED -> LogKind.FAILING
+            PostLogEventType.VERIFY_SKIPPED -> LogKind.OTHER
+            else -> LogKind.OTHER
+        }
+    )
+
     private fun ChannelEntity.toRow(): ChannelRow {
-        val now = System.currentTimeMillis()
         val status = lastStatus
         val kind = when {
             status == null && lastPostedAt == null -> ChannelStatusKind.NEVER_POSTED
@@ -116,25 +383,12 @@ class AutoPostViewModel(application: Application) : AndroidViewModel(application
             status == null -> ChannelStatusKind.FAILING
             else -> ChannelStatusKind.RUNNING
         }
-        val line = when (kind) {
-            ChannelStatusKind.RUNNING -> {
-                val remaining = ((nextTickAt ?: now) - now).coerceAtLeast(0) / 1000
-                "Running (next in %02d:%02d)".format(remaining / 60, remaining % 60)
-            }
-            ChannelStatusKind.RATE_LIMITED -> {
-                val remaining = ((nextTickAt ?: now) - now).coerceAtLeast(0) / 1000
-                "Rate limited (retry in ${remaining}s)"
-            }
-            ChannelStatusKind.AUTH_FAILED -> "Auth failed - fix token"
-            ChannelStatusKind.FAILING -> "Failing - retrying with backoff"
-            ChannelStatusKind.NEVER_POSTED -> "Never posted yet"
-        }
         return ChannelRow(
             id = id,
             channelId = channelId,
             message = message,
             intervalSeconds = intervalSeconds,
-            statusLine = line,
+            nextTickAt = nextTickAt,
             statusKind = kind
         )
     }
@@ -158,12 +412,15 @@ class AutoPostViewModel(application: Application) : AndroidViewModel(application
         val trimmedName = name.trim()
         val trimmedToken = token.trim()
         when {
-            trimmedName.isEmpty() -> _error.value = "Bot name is required"
-            trimmedToken.isEmpty() -> _error.value = "Bot token is required"
+            trimmedName.isEmpty() -> _error.value = t("Bot name is required", "Nama bot wajib diisi")
+            trimmedToken.isEmpty() -> _error.value = t("Bot token is required", "Token bot wajib diisi")
             else -> {
                 val existing = app.repository.getAllTokensOnce()
                 if (existing.any { app.cipher.decrypt(it.encryptedToken) == trimmedToken }) {
-                    _error.value = "This token is already used by another bot"
+                    _error.value = t(
+                        "This token is already used by another bot",
+                        "Token ini sudah dipakai bot lain"
+                    )
                     return@launch
                 }
                 val uniqueName = uniqueName(trimmedName, existing.map { it.name })
@@ -201,9 +458,17 @@ class AutoPostViewModel(application: Application) : AndroidViewModel(application
     ) = viewModelScope.launch {
         val trimmedChannel = channelId.trim()
         when {
-            trimmedChannel.isEmpty() -> _error.value = "Channel id is required"
-            message.isBlank() -> _error.value = "Message is required"
-            intervalSeconds < 1 -> _error.value = "Interval must be at least 1 second"
+            trimmedChannel.isEmpty() -> _error.value = t("Channel id is required", "ID channel wajib diisi")
+            message.isBlank() -> _error.value = t("Message is required", "Pesan wajib diisi")
+            message.length > com.gabut.autopost.data.PostRepository.MAX_MESSAGE_LENGTH ->
+                _error.value = t(
+                    "Discord messages are limited to 2,000 characters",
+                    "Pesan Discord maksimal 2.000 karakter"
+                )
+            intervalSeconds < 1 -> _error.value = t(
+                "Interval must be at least 1 second",
+                "Interval minimal 1 detik"
+            )
             else -> {
                 app.repository.upsertChannel(tokenId, trimmedChannel, message, intervalSeconds)
                 _error.value = null
@@ -225,13 +490,19 @@ class AutoPostViewModel(application: Application) : AndroidViewModel(application
 
             if (name.isNotBlank() && name.trim() != current.name) {
                 if (existing.any { it.name == name.trim() }) {
-                    _error.value = "Another bot already uses that name"
+                    _error.value = t(
+                        "Another bot already uses that name",
+                        "Nama itu sudah dipakai bot lain"
+                    )
                     return@launch
                 }
             }
             if (token != null && token.isNotBlank()) {
                 if (existing.any { app.cipher.decrypt(it.encryptedToken) == token.trim() }) {
-                    _error.value = "This token is already used by another bot"
+                    _error.value = t(
+                        "This token is already used by another bot",
+                        "Token ini sudah dipakai bot lain"
+                    )
                     return@launch
                 }
             }
@@ -246,6 +517,7 @@ class AutoPostViewModel(application: Application) : AndroidViewModel(application
             )
             app.repository.updateToken(updated)
             _error.value = null
+            _info.value = t("Bot settings saved", "Setelan bot disimpan")
             onDone()
         }
 
@@ -260,7 +532,7 @@ class AutoPostViewModel(application: Application) : AndroidViewModel(application
             app.repository.updateToken(
                 current.copy(useWebhook = enabled, encryptedWebhookUrl = encryptedUrl)
             )
-            _info.value = "Webhook settings saved"
+            _info.value = t("Webhook settings saved", "Setelan webhook disimpan")
             onDone()
         }
 
@@ -271,14 +543,32 @@ class AutoPostViewModel(application: Application) : AndroidViewModel(application
         val token = app.repository.getToken(tokenId) ?: return@launch
         val url = app.cipher.decrypt(token.encryptedWebhookUrl)
         if (!token.useWebhook || url.isNullOrBlank()) {
-            onResult(false, "Webhook is not enabled or the URL is missing")
+            onResult(
+                false,
+                t(
+                    "Webhook is not enabled or the URL is missing",
+                    "Webhook belum aktif atau URL-nya kosong"
+                )
+            )
             return@launch
         }
         val result = withContext(Dispatchers.IO) {
-            app.client.sendWebhookLog(url, null, "Test message from Auto Post", success = true)
+            app.client.sendWebhookLog(
+                url,
+                null,
+                t("Test message from FunkPost", "Pesan uji dari FunkPost"),
+                success = true
+            )
         }
         val ok = result is com.gabut.autopost.network.SendResult.Success
-        onResult(ok, if (ok) "Test webhook sent" else "Test webhook failed")
+        onResult(
+            ok,
+            if (ok) {
+                t("Test webhook sent", "Webhook uji terkirim")
+            } else {
+                t("Test webhook failed", "Webhook uji gagal")
+            }
+        )
     }
 
     suspend fun batteryCardDismissed(): Boolean =
@@ -290,6 +580,10 @@ class AutoPostViewModel(application: Application) : AndroidViewModel(application
 
     fun setDarkMode(enabled: Boolean) = viewModelScope.launch {
         app.settingsStore.setDarkMode(enabled)
+    }
+
+    fun setLanguage(language: AppLanguage) = viewModelScope.launch {
+        app.settingsStore.setLanguage(language.code)
     }
 
     fun clearMessages() {
