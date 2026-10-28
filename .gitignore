@@ -1,0 +1,21 @@
+# gradle
+.gradle/
+build/
+local.properties
+*.keystore
+key.properties
+
+# ide
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# misc
+*.log
+
+# local scratch (session artifacts, not project sources)
+gv.txt
+test-run.log
